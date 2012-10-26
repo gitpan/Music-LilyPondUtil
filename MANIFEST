@@ -1,0 +1,7 @@
+Makefile.PL
+MANIFEST
+README
+t/Music-LilyPondUtil.t
+lib/Music/LilyPondUtil.pm
+META.yml                                 Module YAML meta-data (added by MakeMaker)
+META.json                                Module JSON meta-data (added by MakeMaker)
