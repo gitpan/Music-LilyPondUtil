@@ -10,13 +10,13 @@ use warnings;
 use Carp qw(croak);
 use Scalar::Util qw(blessed looks_like_number);
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 # Since dealing with lilypond, assume 12 pitch material
 my $DEG_IN_SCALE = 12;
 my $TRITONE      = 6;
 
-# this used by both absoluate and relative mode
+# this used by both absolute and relative mode
 my %REGISTERS = (
   0 => q(,,,,),
   1 => q(,,,),
@@ -32,7 +32,7 @@ my %REGISTERS = (
 my $REL_DEF_REG = 4;    # for relative mode, via %REGISTERS
 
 my %N2P = (
-  qw/bis 0 c 0 deses 0 bisis 1 cis 1 des 1 cisis 2 d 2 eeses 2 dis 3 ees 3 feses 3 disis 4 e 4 fes 4 eis 5 f 5 geses 5 eisis 6 fis 6 ges 6 fisis 7 g 7 aeses 7 gis 8 aes 8 gisis 9 a 9 beses 9 ais 10 bes 10 ceses 10 aisis 11 b 11 ces 11/
+  qw/bis 0 c 0 deses 0 bisis 1 cis 1 des 1 cisis 2 d 2 eeses 2 dis 3 ees 3 feses 3 disis 4 e 4 fes 4 eis 5 f 5 geses 5 eisis 6 fis 6 ges 6 fisis 7 g 7 aeses 7 gis 8 aes 8 gisis 9 a 9 beses 9 ais 10 bes 10 ceses 10 aisis 11 b 11 ces 11 0 0 1 1 2 2 3 3 4 4 5 5 6 6 7 7 8 8 9 9 10 10 11 11/
 );
 # mixing flats and sharps not supported, either one or other right now
 my %P2N = (
@@ -236,7 +236,9 @@ Music::LilyPondUtil - utility methods for lilypond data
 
 Utility methods for interacting with lilypond, most notably for the
 conversion of random integers to lilypond note names. The Western 12-
-tone system is assumed.
+tone system is assumed. For more information on lilypond, see:
+
+http://www.lilypond.org/
 
 =head1 METHODS
 
@@ -253,10 +255,9 @@ Constructor. Optional parameters include:
 
 =item *
 
-B<keep_state> a boolean, turned on by default, that will maintain state
-on the previous pitch in the B<p2ly> call. State is not maintained
-across separate calls to B<p2ly>; to enable that behavior, enable the
-B<sticky_state> param.
+B<keep_state> a boolean, enabled by default, that will maintain state on
+the previous pitch in the B<p2ly> call. State is not maintained across
+separate calls to B<p2ly> (see also the B<sticky_state> param).
 
 Disabling this option will remove all register notation from both
 C<relative> and C<absolute> modes.
@@ -267,7 +268,10 @@ B<mode> to set C<absolute> or C<relative> mode.
 
 =item *
 
-B<chrome> to set the accidental style (C<sharps> or C<flats>).
+B<chrome> to set the accidental style (C<sharps> or C<flats>). Mixing
+flats and sharps is not supported. (Under no circumstances are double
+sharps or double flats emitted, though the module does know how to
+read those.)
 
 =item *
 
@@ -291,7 +295,9 @@ Get/set accidental style.
 
 Wipes out the previous pitch (the state variable used with
 B<sticky_state> enabled in C<relative> B<mode> to maintain state across
-multiple calls to B<p2ly>).
+multiple calls to B<p2ly>). Be sure to call this method after completing
+any standalone chord or phrase, as otherwise any subsequent B<p2ly>
+calls will use the previously cached pitch.
 
 =item B<keep_state> I<optional boolean>
 
@@ -312,6 +318,8 @@ Returns list of pitches.
 Converts a list of pitches (integers or objects that have a B<pitch>
 method that returns an integer) to a list of lilypond note names.
 Unknown data will be passed through as is. Returns said converted list.
+The behavior of this method depends heavily on various parameters that
+can be passed to B<new> or called as various methods.
 
 =item B<prev_pitch> I<optional pitch>
 
@@ -331,12 +339,12 @@ Get/set B<sticky_state> param.
 
 =item *
 
-http://www.lilypond.org/
+http://www.lilypond.org/ and most notably the Learning and
+Notation manuals.
 
 =item *
 
-L<Music::AtonalUtil> whose C<atonal-util> command uses this module to
-convert pitch numbers into lilypond note names for more readable output.
+L<App::MusicTools> whose command line tools make use of this module.
 
 =back
 
