@@ -10,40 +10,16 @@ use warnings;
 use Carp qw(croak);
 use Scalar::Util qw(blessed looks_like_number);
 
-our $VERSION = '0.30';
+our $VERSION = '0.40';
 
 # Since dealing with lilypond, assume 12 pitch material
 my $DEG_IN_SCALE = 12;
 my $TRITONE      = 6;
 
-# same register characters used by both absolute and relative mode
-my %REGISTERS = (
-  0 => q(,,,,),
-  1 => q(,,,),
-  2 => q(,,),
-  3 => q(,),
-  4 => q(),
-  5 => q('),
-  6 => q(''),
-  7 => q('''),
-  8 => q(''''),
-  9 => q('''''),
-);
-my $REL_DEF_REG = 4;    # for relative mode, via %REGISTERS
-
-# and the reverse for notes2pitches
-my %REVREGS = (
-  q(,,,,)  => 0,
-  q(,,,)   => 1,
-  q(,,)    => 2,
-  q(,)     => 3,
-  q()      => 4,
-  q(')     => 5,
-  q('')    => 6,
-  q(''')   => 7,
-  q('''')  => 8,
-  q(''''') => 9,
-);
+# Default register - due to "c" in lilypond absolute notation mapping to
+# the fourth register, or MIDI pitch number 48. Used by the reg_*
+# utility subs.
+my $REL_DEF_REG = 4;
 
 # Just the note and register information - the 0,6 bit grants perhaps
 # too much leeway for relative motion (silly things like c,,,,,,,
@@ -87,6 +63,17 @@ sub new {
   $self->{_min_pitch} = $param{min_pitch} // 0;
   $self->{_max_pitch} = $param{max_pitch} // 108;
 
+  if ( exists $param{min_pitch_hook} ) {
+    croak "min_pitch_hook must be code ref"
+      unless ref $param{min_pitch_hook} eq 'CODE';
+    $self->{_min_pitch_hook} = $param{min_pitch_hook};
+  }
+  if ( exists $param{max_pitch_hook} ) {
+    croak "max_pitch_hook must be code ref"
+      unless ref $param{max_pitch_hook} eq 'CODE';
+    $self->{_max_pitch_hook} = $param{max_pitch_hook};
+  }
+
   $self->{_mode} = $param{mode} || 'absolute';
   croak("'mode' must be 'absolute' or 'relative'")
     if $self->{_mode} ne 'absolute' and $self->{_mode} ne 'relative';
@@ -127,15 +114,10 @@ sub diatonic_pitch {
     my $reg_symbol    = $3 // '';
 
     croak "unknown lilypond note $note" unless exists $N2P{$real_note};
-    croak "register out of range for note $note"
-      unless exists $REVREGS{$reg_symbol};
 
-    $pitch = $N2P{$diatonic_note} + $REVREGS{$reg_symbol} * $DEG_IN_SCALE;
+    $pitch =
+      $N2P{$diatonic_note} + $self->reg_sym2num($reg_symbol) * $DEG_IN_SCALE;
     $pitch %= $DEG_IN_SCALE if $self->{_ignore_register};
-
-    if ( $pitch < $self->{_min_pitch} or $pitch > $self->{_max_pitch} ) {
-      croak "pitch $pitch is out of range\n";
-    }
 
   } else {
     croak("unknown note $note");
@@ -191,12 +173,11 @@ sub mode {
         my $reg_symbol    = $3 // '';
 
         croak "unknown lilypond note $pitch" unless exists $N2P{$real_note};
-        croak "register out of range for note $pitch"
-          unless exists $REVREGS{$reg_symbol};
 
         # for relative-to-this just need the diatonic
         $prev_note =
-          $N2P{$diatonic_note} + $REVREGS{$reg_symbol} * $DEG_IN_SCALE;
+          $N2P{$diatonic_note} +
+          $self->reg_sym2num($reg_symbol) * $DEG_IN_SCALE;
 
       } else {
         croak("unknown pitch '$pitch'");
@@ -239,16 +220,13 @@ sub mode {
 
         my ( $diatonic_pitch, $real_pitch );
         if ( $self->{_mode} ne 'relative' ) {    # absolute
-          croak "register out of range for note $n"
-            unless exists $REVREGS{$reg_symbol};
-
-          # TODO see if can do this code regardless of mode, and still
-          # sanity check the register for absolute/relative-no-previous,
-          # but not for relative-with-previous, to avoid code
-          # duplication in abs/r-no-p blocks - or call subs with
-          # appropriate register numbers.
+              # TODO see if can do this code regardless of mode, and still
+              # sanity check the register for absolute/relative-no-previous,
+              # but not for relative-with-previous, to avoid code
+              # duplication in abs/r-no-p blocks - or call subs with
+              # appropriate register numbers.
           ( $diatonic_pitch, $real_pitch ) =
-            map { $N2P{$_} + $REVREGS{$reg_symbol} * $DEG_IN_SCALE }
+            map { $N2P{$_} + $self->reg_sym2num($reg_symbol) * $DEG_IN_SCALE }
             $diatonic_note, $real_note;
 
           # Account for edge cases of ces and bis and the like
@@ -260,12 +238,11 @@ sub mode {
         } else {    # relatively more complicated
 
           if ( !defined $prev_note ) {    # absolute if nothing prior
-            croak "register out of range for note $n"
-              unless exists $REVREGS{$reg_symbol};
-
             ( $diatonic_pitch, $real_pitch ) =
-              map { $N2P{$_} + $REVREGS{$reg_symbol} * $DEG_IN_SCALE }
-              $diatonic_note, $real_note;
+              map {
+              $N2P{$_} +
+                $self->reg_sym2num($reg_symbol) * $DEG_IN_SCALE
+              } $diatonic_note, $real_note;
 
             # Account for edge cases of ces and bis and the like
             my $delta = $diatonic_pitch - $real_pitch;
@@ -286,11 +263,6 @@ sub mode {
             my $reg_offset = _symbol2relreg($reg_symbol);
             if ( $reg_offset != 0 ) {
               $reg_number += $reg_offset * $DEG_IN_SCALE;
-            }
-
-            # confine things to MIDI pitch numbers
-            if ( $reg_number < 0 or $reg_number > 96 ) {
-              croak "register out of range for $n\n";
             }
 
             ( $diatonic_pitch, $real_pitch ) =
@@ -386,8 +358,16 @@ sub mode {
         next;
       }
 
-      if ( $pitch < $self->{_min_pitch} or $pitch > $self->{_max_pitch} ) {
-        croak "pitch $pitch is out of range\n";
+      # Response handling on range check:
+      # * exception - out of bounds, default die() handler tripped
+      # * defined return value - got something from a hook function, use that
+      # * undefined - pitch is within bounds, continue with code below
+      my $range_result;
+      eval { $range_result = $self->_range_check($pitch); };
+      croak $@ if $@;
+      if (defined $range_result) {
+        push @notes, $range_result;
+        next;
       }
 
       my $note = $self->{_p2n_hook}( $pitch, $self->{_chrome} );
@@ -395,7 +375,7 @@ sub mode {
 
       my $register;
       if ( $self->{_mode} ne 'relative' ) {
-        $register = $REGISTERS{ int $pitch / $DEG_IN_SCALE };
+        $register = $self->reg_num2sym( $pitch / $DEG_IN_SCALE );
 
       } else {    # relatively more complicated
         my $rel_reg = $REL_DEF_REG;
@@ -422,7 +402,7 @@ sub mode {
             }
           }
         }
-        $register = $REGISTERS{$rel_reg};
+        $register = $self->reg_num2sym($rel_reg);
         $prev_pitch = $pitch if $self->{_keep_state};
       }
 
@@ -439,6 +419,54 @@ sub mode {
     undef $prev_pitch unless $self->{_sticky_state};
     return @_ > 1 ? @notes : $notes[0];
   }
+}
+
+sub _range_check {
+  my ( $self, $pitch ) = @_;
+  if ( $pitch < $self->{_min_pitch} ) {
+    if ( exists $self->{_min_pitch_hook} ) {
+      return $self->{_min_pitch_hook}($pitch);
+    } else {
+      die "pitch $pitch is too low\n";
+    }
+
+  } elsif ( $pitch > $self->{_max_pitch} ) {
+    if ( exists $self->{_max_pitch_hook} ) {
+      return $self->{_max_pitch_hook}($pitch);
+    } else {
+      die "pitch $pitch is too high\n";
+    }
+  }
+
+  return;
+}
+
+# Utility, converts arbitrary numbers into lilypond register notation
+sub reg_num2sym {
+  my ( $self, $number ) = @_;
+  croak "register number must be numeric"
+    if !defined $number
+      or !looks_like_number $number;
+
+  $number = int $number;
+  my $symbol = q{};
+  if ( $number < $REL_DEF_REG ) {
+    $symbol = q{,} x ( $REL_DEF_REG - $number );
+  } elsif ( $number > $REL_DEF_REG ) {
+    $symbol = q{'} x ( $number - $REL_DEF_REG );
+  }
+  return $symbol;
+}
+
+# Utility, converts arbitrary ,, or ''' into appropriate register number
+sub reg_sym2num {
+  my ( $self, $symbol ) = @_;
+  croak "undefined register symbol" unless defined $symbol;
+  croak "invalid register symbol" unless $symbol =~ m/^(,|')*$/;
+
+  my $dir = $symbol =~ m/[,]/ ? -1 : 1;
+
+  return $REL_DEF_REG + $dir * length $symbol;
 }
 
 sub sticky_state {
@@ -488,8 +516,9 @@ Music::LilyPondUtil - utility methods for lilypond data
 =head1 DESCRIPTION
 
 Utility methods for interacting with lilypond (as of version 2.16), most
-notably for the conversion of random integers to lilypond note names
-(there, and back again). The Western 12-tone system is assumed.
+notably for the conversion of integers to lilypond note names (or the
+other way around, for a subset of the lilypond notation). The Western
+12-tone system is assumed.
 
 The note conversions parse the lilypond defaults, including enharmonic
 equivalents such as C<bes> or C<ceses> (for C double flat or more simply
@@ -540,9 +569,8 @@ C<relative> and C<absolute> modes.
 =item *
 
 B<min_pitch> integer, by default 0, below which pitches passed to
-B<diatonic_pitch> or B<p2ly> will cause the module to throw an
-exception. To constrain pitches to what an 88-key piano is
-capable of, set:
+B<p2ly> will cause the module to by default throw an exception. To
+constrain pitches to what an 88-key piano is capable of, set:
 
   Music::LilyPondUtil->new( min_pitch => 21 );
 
@@ -553,9 +581,35 @@ easily be generated from those...so 0 is the minimum.
 
 =item *
 
+B<min_pitch_hook> code reference to handle minimum pitch cases instead
+of the default exception. The hook is passed the pitch as the sole
+argument, and should return C<undef> if the value is to be accepted, or
+something not defined to use that instead, or could throw an exception,
+which will be re-thrown via C<croak>. One approach would be to silence
+the out-of-bounds pitches by returning a lilypond rest symbol:
+
+  Music::LilyPondUtil->new( min_pitch_hook => sub { 'r' } );
+
+One use for this is to generate pitch numbers via some mechanism and
+then silence or omit the pitches that fall outside a particular range of
+notes via the C<*_pitch_hook> hook functions. See L</"EXAMPLES"> for
+sample code.
+
+=item *
+
 B<max_pitch> integer, by default 108 (the highest note on a standard 88-
-key piano), above which pitches passed to B<diatonic_pitch> or B<p2ly>
-will cause the module to throw an exception.
+key piano), above which pitches passed to B<p2ly> will cause the module
+to by default throw an exception.
+
+=item *
+
+B<max_pitch_hook> code reference to handle minimum pitch cases instead
+of the default exception. For details see B<min_pitch_hook>, above. For
+another example, return the empty string if the maximum pitch is
+exceeded; this differs from replacing the note with a C<r> or C<s>,
+which in lilypond both advance the time by some duration.
+
+  Music::LilyPondUtil->new( max_pitch_hook => sub { '' } );
 
 =item *
 
@@ -670,6 +724,24 @@ For use with B<p2ly>. Get/set previous pitch (the state variable used
 with B<sticky_state> enabled in C<relative> B<mode> to maintain state
 across multiple calls to B<p2ly>).
 
+=item B<reg_num2sym> I<number>
+
+Utility method, converts an arbitrary number into a lilypond
+register symbol, with the empty string being returned for the
+default register C<4>.
+
+  $lyu->reg_num2sym(3)        # ,
+  $lyu->reg_num2sym(6)        # ''
+
+=item B<reg_sym2num> I<register>
+
+Utility method, converts an arbitrary lilypond register symbol into a
+register number. Pass the empty string to obtain the default register.
+
+  $lyu->reg_sym2num( q{,}  )  # 3
+  $lyu->reg_sym2num( q{}   )  # 4
+  $lyu->reg_sym2num( q{''} )  # 6
+
 =item B<sticky_state> I<optional boolean>
 
 Get/set B<sticky_state> param.
@@ -679,6 +751,44 @@ Get/set B<sticky_state> param.
 Get/set B<strip_rests> param.
 
 =back
+
+=head1 EXAMPLES
+
+An idea for composition: generate pitch numbers via some mathematical
+function, and omit the notes if they fall outside a particular range.
+This method requires the use of a graphing calculator, knowledge of
+various mathematical functions, and spare time, though may produce
+interesting results, depending on how the function(s) interact with the
+playable range.
+
+  use Music::LilyPondUtil ();
+  my $lyu = Music::LilyPondUtil->new(
+    min_pitch      => 59,
+    max_pitch      => 79,
+    min_pitch_hook => sub { '' },
+    max_pitch_hook => sub { '' },
+  );
+  
+  # generate notes from mathematical function
+  my @notes;
+  for my $t ( 1 .. 174 ) {
+    my $pitch = 50 * cos( $t / 25 ) + 3 * sin( 2 * $t ) + 22;
+    push @notes, grep length $_ > 0, $lyu->p2ly($pitch);
+  }
+  
+  # replace repeated notes with rests
+  for my $ni ( 1 .. $#notes ) {
+    $notes[$ni] = 'r' if $notes[$ni] eq $notes[ $ni - 1 ];
+  }
+  
+  print "@notes\n";
+
+This output could then be piped to the C<ly-fu> utility of
+L<App::MusicTools>, for example if saved as C<domath>:
+
+  $ perl domath | ly-fu --open --instrument=drawbar\ organ --absolute -
+
+Which in turn would require C<lilypond>, a PDF viewer, and a MIDI player.
 
 =head1 SEE ALSO
 

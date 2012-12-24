@@ -1,15 +1,27 @@
 use strict;
 use warnings;
 
-use Test::More tests => 64;
+use Test::More tests => 72;
 use Test::Exception;
 BEGIN { use_ok('Music::LilyPondUtil') }
 
 my $lyu = Music::LilyPondUtil->new;
 isa_ok( $lyu, 'Music::LilyPondUtil' );
 
-is($lyu->diatonic_pitch(q{c'}), 60, 'diatonic to diatonic');
-is($lyu->diatonic_pitch(q{ceses'}), 60, 'not diatonic to diatonic');
+is( $lyu->diatonic_pitch(q{c'}),     60, 'diatonic to diatonic' );
+is( $lyu->diatonic_pitch(q{ceses'}), 60, 'not diatonic to diatonic' );
+
+########################################################################
+#
+# register utility methods (used internally by other methods)
+
+is( $lyu->reg_num2sym(3), q{,},  'num2sym check' );
+is( $lyu->reg_num2sym(4), q{},   'num2sym check' );
+is( $lyu->reg_num2sym(6), q{''}, 'num2sym check' );
+
+is( $lyu->reg_sym2num(q{,}),  3, 'sym2num check' );
+is( $lyu->reg_sym2num(q{}),   4, 'sym2num check' );
+is( $lyu->reg_sym2num(q{''}), 6, 'sym2num check' );
 
 ########################################################################
 #
@@ -72,7 +84,7 @@ is_deeply(
 
 # tricky - returns pitch of the diatonic, as relative calculations use those
 is( $lyu->prev_note(q{aes'}), 69, 'set previous note' );
-is( $lyu->prev_note(q{a'}), 69, 'set previous note' );
+is( $lyu->prev_note(q{a'}),   69, 'set previous note' );
 
 is_deeply(
   [ $lyu->notes2pitches(
@@ -90,7 +102,7 @@ is_deeply(
 # p2ly - absolute mode (default)
 
 # KLUGE on min_pitch to fit old tests to new defaults
-$lyu = Music::LilyPondUtil->new(min_pitch=>-30);
+$lyu = Music::LilyPondUtil->new( min_pitch => -30 );
 
 is( $lyu->p2ly(60), q{c'},  q{absolute 60 -> c'} );
 is( $lyu->p2ly(59), q{b},   q{absolute 59 -> b} );
@@ -309,6 +321,10 @@ ok( !defined $lyu->prev_pitch, 'previous pitch cleared' );
 $lyu->sticky_state(0);
 ok( !$lyu->sticky_state, 'sticky_state is disabled' );
 
+########################################################################
+#
+# min/max pitch constraints
+
 $lyu = Music::LilyPondUtil->new;
 dies_ok( sub { $lyu->p2ly(-1) }, "min_pitch default" );
 is( $lyu->p2ly(12), 'c,,,', 'low pitch conversion' );
@@ -318,3 +334,11 @@ is( $lyu->p2ly(108), q{c'''''}, 'high pitch conversion' );
 $lyu = Music::LilyPondUtil->new( min_pitch => 21, max_pitch => 60 );
 dies_ok( sub { $lyu->p2ly(12) }, "custom min_pitch" );
 dies_ok( sub { $lyu->p2ly(61) }, "custom max_pitch" );
+
+$lyu = Music::LilyPondUtil->new(
+  min_pitch_hook => sub { 'r' },
+  max_pitch_hook => sub { 's' },
+);
+
+is( $lyu->p2ly(-999), 'r', 'min pitch hook' );
+is( $lyu->p2ly(999),  's', 'max pitch hook' );
