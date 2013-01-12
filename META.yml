@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               Music-LilyPondUtil
-version:            0.43
+version:            0.50
 abstract:           utility methods for lilypond data
 author:
     - Jeremy Mates <jmates@cpan.org>
