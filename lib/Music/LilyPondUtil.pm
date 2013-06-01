@@ -9,10 +9,11 @@ package Music::LilyPondUtil;
 use 5.010000;
 use strict;
 use warnings;
-use Carp qw(croak);
-use Scalar::Util qw(blessed looks_like_number);
+use Carp qw/croak/;
+use Scalar::Util qw/blessed looks_like_number/;
+use Try::Tiny;
 
-our $VERSION = '0.50';
+our $VERSION = '0.52';
 
 # Since dealing with lilypond, assume 12 pitch material
 my $DEG_IN_SCALE = 12;
@@ -89,7 +90,7 @@ sub _symbol2relreg {
 sub chrome {
   my ( $self, $chrome ) = @_;
   if ( defined $chrome ) {
-    croak("chrome must be 'sharps' or 'flats'") unless exists $P2N{$chrome};
+    croak q{chrome must be 'sharps' or 'flats'} unless exists $P2N{$chrome};
     $self->{_chrome} = $chrome;
   }
   return $self->{_chrome};
@@ -110,7 +111,7 @@ sub clear_prev_pitch {
 sub diatonic_pitch {
   my ( $self, $note ) = @_;
 
-  croak "note not defined" unless defined $note;
+  croak 'note not defined' unless defined $note;
 
   my $pitch;
   if ( $note =~ m/^$LY_NOTE_RE/ ) {
@@ -126,7 +127,7 @@ sub diatonic_pitch {
     $pitch %= $DEG_IN_SCALE if $self->{_ignore_register};
 
   } else {
-    croak("unknown note $note");
+    croak "unknown note $note";
   }
 
   return $pitch;
@@ -147,7 +148,7 @@ sub keep_state {
 sub mode {
   my ( $self, $mode ) = @_;
   if ( defined $mode ) {
-    croak("mode must be 'absolute' or 'relative'")
+    croak q{mode must be 'absolute' or 'relative'}
       if $mode ne 'absolute' and $mode ne 'relative';
     $self->{_mode} = $mode;
   }
@@ -159,7 +160,7 @@ sub new {
   my $self = {};
 
   $self->{_chrome} = $param{chrome} || 'sharps';
-  croak("chrome must be 'sharps' or 'flats'")
+  croak q{chrome must be 'sharps' or 'flats'}
     unless exists $P2N{ $self->{_chrome} };
 
   $self->{_keep_state}      = $param{keep_state}      // 1;
@@ -172,23 +173,23 @@ sub new {
   $self->{_max_pitch} = $param{max_pitch} // 108;
 
   if ( exists $param{min_pitch_hook} ) {
-    croak "min_pitch_hook must be code ref"
+    croak 'min_pitch_hook must be code ref'
       unless ref $param{min_pitch_hook} eq 'CODE';
     $self->{_min_pitch_hook} = $param{min_pitch_hook};
   }
   if ( exists $param{max_pitch_hook} ) {
-    croak "max_pitch_hook must be code ref"
+    croak 'max_pitch_hook must be code ref'
       unless ref $param{max_pitch_hook} eq 'CODE';
     $self->{_max_pitch_hook} = $param{max_pitch_hook};
   }
 
   $self->{_mode} = $param{mode} || 'absolute';
-  croak("'mode' must be 'absolute' or 'relative'")
+  croak q{'mode' must be 'absolute' or 'relative'}
     if $self->{_mode} ne 'absolute' and $self->{_mode} ne 'relative';
 
   $self->{_p2n_hook} = $param{p2n_hook}
     || sub { $P2N{ $_[1] }->{ $_[0] % $DEG_IN_SCALE } };
-  croak("'p2n_hook' must be code ref")
+  croak q{'p2n_hook' must be code ref}
     unless ref $self->{_p2n_hook} eq 'CODE';
 
   $self->{_sticky_state} = $param{sticky_state} // 0;
@@ -202,7 +203,7 @@ sub notes2pitches {
   my $self = shift;
   my @pitches;
 
-  for my $n (@_) {
+  for my $n ( ref $_[0] eq 'ARRAY' ? @{ $_[0] } : @_ ) {
     # pass through what hopefully are raw pitch numbers, otherwise parse
     # note from subset of the lilypond note format
     if ( !defined $n ) {
@@ -311,14 +312,14 @@ sub p2ly {
   my $self = shift;
 
   my @notes;
-  for my $obj (@_) {
+  for my $obj ( ref $_[0] eq 'ARRAY' ? @{ $_[0] } : @_ ) {
     my $pitch;
     if ( !defined $obj ) {
-      croak "cannot convert undefined value to lilypond element\n";
+      croak "cannot convert undefined value to lilypond element";
     } elsif ( blessed $obj and $obj->can("pitch") ) {
       $pitch = $obj->pitch;
     } elsif ( looks_like_number $obj) {
-      $pitch = $obj;
+      $pitch = int $obj;
     } else {
       # pass through on unknowns (could be rests or who knows what)
       push @notes, $obj;
@@ -330,8 +331,10 @@ sub p2ly {
     # * defined return value - got something from a hook function, use that
     # * undefined - pitch is within bounds, continue with code below
     my $range_result;
-    eval { $range_result = $self->_range_check($pitch); };
-    croak $@ if $@;
+    try { $range_result = $self->_range_check($pitch) }
+    catch {
+      croak $_;
+    };
     if ( defined $range_result ) {
       push @notes, $range_result;
       next;
@@ -408,7 +411,7 @@ sub prev_note {
         $self->reg_sym2num($reg_symbol) * $DEG_IN_SCALE;
 
     } else {
-      croak("unknown pitch '$pitch'");
+      croak "unknown pitch '$pitch'";
     }
   }
   return $self->{prev_note};
@@ -419,10 +422,13 @@ sub prev_pitch {
   if ( defined $pitch ) {
     if ( blessed $pitch and $pitch->can("pitch") ) {
       $self->{prev_pitch} = $pitch->pitch;
-    } elsif ( looks_like_number $pitch ) {
-      $self->{prev_pitch} = $pitch;
+    } elsif ( looks_like_number $pitch) {
+      $self->{prev_pitch} = int $pitch;
     } else {
-      croak("unknown pitch '$pitch'");
+      try { $self->{prev_pitch} = $self->diatonic_pitch($pitch) }
+      catch {
+        croak $_;
+      };
     }
   }
   return $self->{prev_pitch};
@@ -431,7 +437,7 @@ sub prev_pitch {
 # Utility, converts arbitrary numbers into lilypond register notation
 sub reg_num2sym {
   my ( $self, $number ) = @_;
-  croak "register number must be numeric"
+  croak 'register number must be numeric'
     if !defined $number
     or !looks_like_number $number;
 
@@ -448,8 +454,8 @@ sub reg_num2sym {
 # Utility, converts arbitrary ,, or ''' into appropriate register number
 sub reg_sym2num {
   my ( $self, $symbol ) = @_;
-  croak "undefined register symbol" unless defined $symbol;
-  croak "invalid register symbol"   unless $symbol =~ m/^(,|')*$/;
+  croak 'undefined register symbol' unless defined $symbol;
+  croak 'invalid register symbol'   unless $symbol =~ m/^(,|')*$/;
 
   my $dir = $symbol =~ m/[,]/ ? -1 : 1;
 
@@ -477,7 +483,7 @@ Music::LilyPondUtil - utility methods for lilypond data
 
 =head1 SYNOPSIS
 
-  use Music::LilyPondUtil;
+  use Music::LilyPondUtil ();
   my $lyu   = Music::LilyPondUtil->new;
 
   my $pitch = $lyu->notes2pitches("c'") # 60
@@ -691,7 +697,18 @@ Converts a list of pitches (integers or objects that have a B<pitch>
 method that returns an integer) to a list of lilypond note names.
 Unknown data will be passed through as is. Returns said converted list.
 The behavior of this method depends heavily on various parameters that
-can be passed to B<new> or called as various methods.
+can be passed to B<new> or called as various methods, notably
+the B<prev_pitch> method to set the most recent diatonic pitch.
+
+However, note that B<prev_pitch> will only influence the first note
+(probably in a surprising way). Pitches are pitches, and if they need to
+be transposed to a particular register, run something like:
+
+  $n += 60 for @list_of_pitches;
+
+on all the pitches. Methods from L<Music::Canon> might be another
+option, for example if contrary motion or retrograde must also be
+calculated on the pitches to be transposed.
 
 =item B<prev_note> I<optional note>
 
@@ -707,7 +724,10 @@ C<c,>, and C<fisfis'''> the pitch for C<f'''>).
 
 For use with B<p2ly>. Get/set previous pitch (the state variable used
 with B<sticky_state> enabled in C<relative> B<mode> to maintain state
-across multiple calls to B<p2ly>).
+across multiple calls to B<p2ly>). Can be a pitch number, or lilypond
+note name, though the lilypond note name will be converted to the
+nearest diatonic pitch number, and may be influenced by various other
+parameters set (notably B<ignore_register>).
 
 =item B<reg_num2sym> I<number>
 
@@ -798,6 +818,9 @@ L<Music::AtonalUtil> to fold out-of-bounds pitches to within the limits:
 
 L<http://www.lilypond.org/> and most notably the Learning and
 Notation manuals.
+
+My other music related modules, including L<App::MusicTools>,
+L<Music::AtonalUtil>, and L<Music::Canon>.
 
 =head1 AUTHOR
 
