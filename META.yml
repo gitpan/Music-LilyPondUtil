@@ -23,8 +23,9 @@ requires:
   Test::Exception: 0
   Test::More: 0
   Try::Tiny: 0
+  perl: 5.01
 resources:
   homepage: https://github.com/thrig/Music-LilyPondUtil
   license: http://dev.perl.org/licenses/
   repository: https://github.com/thrig/Music-LilyPondUtil
-version: 0.52
+version: 0.53

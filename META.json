@@ -36,7 +36,8 @@
             "Scalar::Util" : "0",
             "Test::Exception" : "0",
             "Test::More" : "0",
-            "Try::Tiny" : "0"
+            "Try::Tiny" : "0",
+            "perl" : "5.01"
          }
       }
    },
@@ -50,5 +51,5 @@
          "url" : "https://github.com/thrig/Music-LilyPondUtil"
       }
    },
-   "version" : "0.52"
+   "version" : "0.53"
 }
