@@ -3,6 +3,19 @@
 # http://www.lilypond.org/ related utility code (mostly to transition
 # between Perl processing integers and the related appropriate letter
 # names for the black dots in lilypond).
+#
+# TODO - duration support, perhaps better OO so can have a list of
+# events (or use a Music::Stash format of onset times like Cope does,
+# but doing retrograde on that would require study, as would converting
+# it to notation), consider whether want backwards portability on the
+# dur. support or not, slightly more complicated processing so can read
+# and emit lilypond triplets (e.g. state parser that looks for \times
+# 2/3 { ... } and modifies a duration adjuster, consider what format to
+# store the duration as (raw? milliseconds? something between?)
+#
+# more complicated format would allow for simultaneous voices, though
+# that might aim more towards using MIDI, which has tracks and whatnot
+# already, and could perhaps operate on MIDI bits?
 
 package Music::LilyPondUtil;
 
@@ -13,7 +26,7 @@ use Carp qw/croak/;
 use Scalar::Util qw/blessed looks_like_number/;
 use Try::Tiny;
 
-our $VERSION = '0.53';
+our $VERSION = '0.54';
 
 # Since dealing with lilypond, assume 12 pitch material
 my $DEG_IN_SCALE = 12;
@@ -33,7 +46,7 @@ my $LY_NOTE_RE = qr/(([a-g])(?:eses|isis|es|is)?)(([,'])\g{-1}{0,6})?/;
 my %N2P = (
   qw/bis 0 c 0 deses 0 bisis 1 cis 1 des 1 cisis 2 d 2 eeses 2 dis 3 ees 3 feses 3 disis 4 e 4 fes 4 eis 5 f 5 geses 5 eisis 6 fis 6 ges 6 fisis 7 g 7 aeses 7 gis 8 aes 8 gisis 9 a 9 beses 9 ais 10 bes 10 ceses 10 aisis 11 b 11 ces 11/
 );
-# mixing flats and sharps not supported, either one or other right now
+# mixing flats and sharps not supported in the output, either one or other
 my %P2N = (
   flats  => {qw/0 c 1 des 2 d 3 ees 4 e 5 f 6 ges 7 g 8 aes 9 a 10 bes 11 b/},
   sharps => {qw/0 c 1 cis 2 d 3 dis 4 e 5 f 6 fis 7 g 8 gis 9 a 10 ais 11 b/},
